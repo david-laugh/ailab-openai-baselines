@@ -32,5 +32,6 @@ src
 
 *.egg-info
 .cache
+__pycache__
 
 MUJOCO_LOG.TXT

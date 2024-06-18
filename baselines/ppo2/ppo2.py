@@ -222,9 +222,10 @@ def learn(
             model.save(savepath)
 
     return model
+
+
 # Avoid division error when calculate the mean (in our case if epinfo is empty returns np.nan, not return an error)
 def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)
-
 
 
