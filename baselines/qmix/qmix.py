@@ -9,6 +9,7 @@ try:
 except ImportError:
     MPI = None
 from baselines.qmix.modules.runners.episode_runner import EpisodeRunner
+from baselines.qmix.components.action_selectors import EpsilonGreedyActionSelector
 
 
 def constfn(val):
@@ -73,7 +74,6 @@ def learn(
     if eval_env is not None:
         eval_runner = EpisodeRunner(env=eval_env, model=model, nsteps=nsteps, gamma=gamma)
 
-
     epinfobuf = deque(maxlen=buffer_size)
     if eval_env is not None:
         eval_epinfobuf = deque(maxlen=buffer_size)
@@ -84,7 +84,12 @@ def learn(
     # Start total timer
     tfirststart = time.perf_counter()
 
+    # EpsilonGreedyActionSelector
+    actionSelector = EpsilonGreedyActionSelector()
+
     nupdates = total_timesteps//nbatch
+
+    env.reset()
     for update in range(1, nupdates+1):
         assert nbatch % nminibatches == 0
         # Start timer
@@ -98,10 +103,9 @@ def learn(
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
         # Get minibatch
-        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run() #pylint: disable=E0632
+        obs, avail_actions, rewards, actions, state, dones = runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
         if eval_env is not None:
-            eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
-
+            obs, avail_actions, rewards, actions, state, dones = eval_runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
 
 
     return 1
