@@ -1,9 +1,12 @@
 import numpy as np
 import torch
 
+from baselines.common.runners import AbstractEnvRunner
 
-class EpisodeRunner:
-    def __init__(self, *, env, model, nsteps, gamma):
+
+class EpisodeRunner(AbstractEnvRunner):
+    def __init__(self, *, env, model, nsteps, gamma, n_agents=3):
+        super().__init__(env=env, model=model, nsteps=nsteps)
         self.env=env
         self.model=model
         self.nsteps=nsteps
@@ -12,51 +15,53 @@ class EpisodeRunner:
         self.gamma = gamma
 
         # nn
-        self.hidden_states = [self.model.init_hidden() for _ in range(3)]
-        self.inputs = self.model.init_inputs()
+        self.hidden_states = [
+            [self.model.init_hidden() for _ in range(n_agents)]
+            for _ in range(self.env.num_envs)
+        ]
+
+        self.n_agents = n_agents
 
     def run(self, actionSelector, T, test_mode=False):
-        mb_obs, mb_avail_actions, mb_rewards, mb_actions, mb_state, mb_dones = [], [], [], [], [], []
+        mb_obs, mb_avail_actions, mb_rewards, mb_actions, mb_states, mb_dones = [], [], [], [], [], []
 
-        env_obs, env_reward, env_done, env_info = self.env.step([
-            self.env.action_space.sample(),
-            self.env.action_space.sample(),
-            self.env.action_space.sample(),
-        ])
+        env_obs = self.env.reset()
 
-        actions = []
-        q_values = []
-        for agent_id, obs in enumerate(env_obs):
-            obs = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-            print(obs.shape)
-            q, self.hidden_states[agent_id] = self.model.forward(obs, self.hidden_states[agent_id])
-            avail_actions = torch.ones(1, q.size(1))
-            action = actionSelector.select_action(q, avail_actions, T)
-            actions.append(action)
-            q_values.append(q)
+        for _ in range(self.nsteps):
+            actions = []
+            for env_id in range(self.env.num_envs):
+                obss, avail_actionss, rewardss, actionss, states, doness = [], [], [], [], [], []
+                for agent_id in range(self.n_agents):
+                    obs = torch.tensor(env_obs[env_id][agent_id].flatten(), dtype=torch.float32).unsqueeze(0)
+                    q, self.hidden_states[env_id][agent_id] = self.model.forward(obs, self.hidden_states[env_id][agent_id])
+                    avail_actions = torch.ones(1, q.size(1))
+                    action = actionSelector.select_action(q, avail_actions, T)
 
-            mb_obs.append(obs)
-            mb_avail_actions.append(avail_actions)
-            mb_rewards.append(0)
-            mb_actions.append(action)
-            mb_state.append(self.hidden_states[agent_id])
-            mb_dones.append(False)
+                    obss.append(obs.numpy())  # Convert tensor to numpy
+                    avail_actionss.append(avail_actions.numpy())  # Convert tensor to numpy
+                    rewardss.append(0)
+                    actionss.append(action)  # Convert tensor to numpy
+                    states.append(self.hidden_states[env_id][agent_id].detach().numpy())  # Convert tensor to numpy
 
-        env_obs, env_rewards, env_dones, env_infos = self.env.step(actions)
-        for i in range(len(env_rewards)):
-            mb_rewards[-len(env_rewards) + i] = env_rewards[i]
-            mb_dones[-len(env_dones) + i] = env_dones[i]
+                mb_obs.append(obss)
+                mb_avail_actions.append(avail_actionss)
+                mb_rewards.append(rewardss)
+                mb_actions.append(actionss)
+                mb_states.append(states)
+                mb_dones.append(False)
+                actions.append(actionss)
 
-        return mb_obs, mb_avail_actions, mb_rewards, mb_actions, mb_state, mb_dones
+            env_obs, env_rewards, env_dones, env_infos = self.env.step(actions)
 
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
-            mb_states, epinfos)
+            for env_id in range(self.env.num_envs):
+                for i in range(len(env_rewards)):
+                    mb_rewards[env_id][-len(env_rewards) + i] = env_rewards[env_id][i]
+                    mb_dones[-len(env_dones) + i] = env_dones[env_id]
 
+        mb_obs = np.asarray(mb_obs, dtype=np.float32)
+        mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
+        mb_actions = np.asarray(mb_actions, dtype=np.int32)
+        mb_states = np.asarray(mb_states, dtype=np.float32)
+        mb_dones = np.asarray(mb_dones, dtype=np.bool)
 
-# obs, returns, masks, actions, values, neglogpacs, states = runner.run()
-def sf01(arr):
-    """
-    swap and then flatten axes 0 and 1
-    """
-    s = arr.shape
-    return arr.swapaxes(0, 1).reshape(s[0] * s[1], *s[2:])
+        return mb_obs, mb_avail_actions, mb_rewards, mb_actions, mb_states, mb_dones

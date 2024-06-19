@@ -18,7 +18,7 @@ class RNNAgent(nn.Module):
         # make hidden states on same device as model
         return self.fc1.weight.new(1, self.rnn_hidden_dim).zero_()
 
-    def init_inputs(self):
+    def initial_state(self):
         # sample
         return torch.zeros(1, self.input_shape)
 

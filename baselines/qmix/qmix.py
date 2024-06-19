@@ -103,9 +103,13 @@ def learn(
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
         # Get minibatch
-        obs, avail_actions, rewards, actions, state, dones = runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
+        obs, avail_actions, rewards, actions, state, dones = \
+            runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
         if eval_env is not None:
-            obs, avail_actions, rewards, actions, state, dones = eval_runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
+            obs, avail_actions, rewards, actions, state, dones = \
+                eval_runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
+
+        if update % log_interval == 0 and is_mpi_root: logger.info('Done.')
 
 
     return 1
