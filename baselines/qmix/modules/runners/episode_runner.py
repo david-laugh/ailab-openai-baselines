@@ -21,11 +21,14 @@ class EpisodeRunner(AbstractEnvRunner):
         ]
 
         self.n_agents = n_agents
+        print(f"self._n_agents {self.n_agents}")
 
     def run(self, actionSelector, T, test_mode=False):
         mb_obs, mb_avail_actions, mb_rewards, mb_actions, mb_states, mb_dones = [], [], [], [], [], []
 
-        env_obs = self.env.reset()
+        env_obs, _, _, _ = self.env.step([
+            self.env.action_space.sample() for _ in range(self.env.num_envs)
+        ])
 
         for _ in range(self.nsteps):
             actions = []
@@ -54,9 +57,9 @@ class EpisodeRunner(AbstractEnvRunner):
             env_obs, env_rewards, env_dones, env_infos = self.env.step(actions)
 
             for env_id in range(self.env.num_envs):
-                for i in range(len(env_rewards)):
-                    mb_rewards[env_id][-len(env_rewards) + i] = env_rewards[env_id][i]
-                    mb_dones[-len(env_dones) + i] = env_dones[env_id]
+                for i in range(self.n_agents):
+                    mb_rewards[env_id][i] = env_rewards[env_id][i]
+                    mb_dones[i] = env_dones[env_id]
 
         mb_obs = np.asarray(mb_obs, dtype=np.float32)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32)

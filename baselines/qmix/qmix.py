@@ -1,4 +1,5 @@
 import time
+import random
 from collections import deque
 
 import numpy as np
@@ -18,9 +19,27 @@ def constfn(val):
     return f
 
 
+class ReplayBuffer:
+    def __init__(self, size):
+        self.size = size
+        self.buffer = deque(maxlen=size)
+
+    def add(self, obs, avail_actions, rewards, actions, states, dones):
+        self.buffer.append((obs, avail_actions, rewards, actions, states, dones))
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        obs, avail_actions, rewards, actions, states, dones = zip(*batch)
+        return np.array(obs), np.array(avail_actions), np.array(rewards), np.array(actions), np.array(states), np.array(dones)
+
+    def __len__(self):
+        return len(self.buffer)
+
+
+
 def learn(
     *, env, total_timesteps,
-    eval_env=None, seed=None, nsteps=2048,
+    eval_env=None, seed=None, nsteps=32,
     ent_coef=0.0, lr=3e-4, vf_coef=0.5,
     max_grad_norm=0.5, gamma=0.99, lam=0.95,
     log_interval=10, nminibatches=4, noptepochs=4,
@@ -70,13 +89,11 @@ def learn(
         model.load(load_path)
 
     # Instantiate the runner object
-    runner = EpisodeRunner(env=env, model=model, nsteps=nsteps, gamma=gamma)
+    runner = EpisodeRunner(env=env, model=model, nsteps=nsteps, gamma=gamma, n_agents=num_agents)
     if eval_env is not None:
         eval_runner = EpisodeRunner(env=eval_env, model=model, nsteps=nsteps, gamma=gamma)
 
-    epinfobuf = deque(maxlen=buffer_size)
-    if eval_env is not None:
-        eval_epinfobuf = deque(maxlen=buffer_size)
+    replay_buffer = ReplayBuffer(buffer_size)
 
     if init_fn is not None:
         init_fn()
@@ -91,7 +108,8 @@ def learn(
 
     env.reset()
     for update in range(1, nupdates+1):
-        assert nbatch % nminibatches == 0
+        print(f"{update} / {nupdates+1}")
+        # assert nbatch % nminibatches == 0
         # Start timer
         tstart = time.perf_counter()
         frac = 1.0 - (update - 1.0) / nupdates
@@ -103,13 +121,37 @@ def learn(
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
         # Get minibatch
+        print("Before runner.run")
         obs, avail_actions, rewards, actions, state, dones = \
             runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
         if eval_env is not None:
             obs, avail_actions, rewards, actions, state, dones = \
                 eval_runner.run(actionSelector, update*nbatch) #pylint: disable=E0632
-
+        print("After runner.run")
         if update % log_interval == 0 and is_mpi_root: logger.info('Done.')
 
+        # Store the episodes in the replay buffer
+        replay_buffer.add(obs, avail_actions, rewards, actions, state, dones)
+
+        # Sample a batch from the replay buffer
+        if len(replay_buffer) > nbatch_train:
+            for _ in range(noptepochs):
+                batch_obs, batch_avail_actions, batch_rewards, batch_actions, batch_states, batch_dones = replay_buffer.sample(nbatch_train)
+                
+                # # Compute targets and update the model
+                # q_vals, target_q_vals = model.compute_q_values(batch_obs, batch_states)
+                # targets = batch_rewards + gamma * np.max(target_q_vals, axis=1) * (1 - batch_dones)
+                # loss = model.update(batch_obs, batch_actions, targets)
+
+                # if update_fn is not None:
+                #     update_fn(update, model, loss)
+
+        # if save_interval and (update % save_interval == 0 or update == 1) and is_mpi_root:
+        #     path = "20240620"
+        #     model.save(f"./models/{path}.pt")
+
+        # if update % log_interval == 0 and is_mpi_root:
+        #     logger.info(f"Update {update}, loss {loss}")
 
     return 1
+
